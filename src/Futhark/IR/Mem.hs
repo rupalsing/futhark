@@ -250,12 +250,12 @@ type MemBound u = MemInfo SubExp u MemBind
 instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemPrim pt) = Prim pt
   declExtTypeOf (MemMem space) = Mem space
-  declExtTypeOf (MemArray pt shape u _) = Array pt shape u
+  declExtTypeOf (MemArray pt shape u _) = Array (ElemPrim pt) shape u
 
 instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
-  extTypeOf (MemArray pt shape u _) = Array pt shape u
+  extTypeOf (MemArray pt shape u _) = Array (ElemPrim pt) shape u
 
 instance FixExt ret => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
@@ -269,12 +269,12 @@ instance Typed (MemInfo SubExp Uniqueness ret) where
 instance Typed (MemInfo SubExp NoUniqueness ret) where
   typeOf (MemPrim pt) = Prim pt
   typeOf (MemMem space) = Mem space
-  typeOf (MemArray bt shape u _) = Array bt shape u
+  typeOf (MemArray bt shape u _) = Array (ElemPrim bt) shape u
 
 instance DeclTyped (MemInfo SubExp Uniqueness ret) where
   declTypeOf (MemPrim bt) = Prim bt
   declTypeOf (MemMem space) = Mem space
-  declTypeOf (MemArray bt shape u _) = Array bt shape u
+  declTypeOf (MemArray bt shape u _) = Array (ElemPrim bt) shape u
 
 instance (FreeIn d, FreeIn ret) => FreeIn (MemInfo d u ret) where
   freeIn' (MemArray _ shape _ ret) = freeIn' shape <> freeIn' ret
@@ -322,7 +322,7 @@ instance (PP.Pretty (TypeBase (ShapeBase d) u),
   ppr (MemMem DefaultSpace) = PP.text "mem"
   ppr (MemMem s) = PP.text "mem" <> PP.ppr s
   ppr (MemArray bt shape u ret) =
-    PP.ppr (Array bt shape u) <> PP.text "@" <> PP.ppr ret
+    PP.ppr (Array (ElemPrim bt) shape u) <> PP.text "@" <> PP.ppr ret
 
 instance PP.Pretty (Param (MemInfo SubExp Uniqueness ret)) where
   ppr = PP.ppr . fmap declTypeOf
@@ -832,14 +832,14 @@ extReturns ts =
             return $ MemPrim bt
           addDec (Mem space) =
             return $ MemMem space
-          addDec t@(Array bt shape u)
+          addDec t@(Array (ElemPrim pt) shape u)
             | existential t = do
               i <- get <* modify (+1)
-              return $ MemArray bt shape u $ Just $
+              return $ MemArray pt shape u $ Just $
                 ReturnsNewBlock DefaultSpace i $
                 IxFun.iota $ map convert $ shapeDims shape
             | otherwise =
-              return $ MemArray bt shape u Nothing
+              return $ MemArray pt shape u Nothing
           convert (Ext i) = LeafExp (Ext i) int32
           convert (Free v) = Free <$> primExpFromSubExp int32 v
 
@@ -919,18 +919,19 @@ expReturns e@(DoLoop ctx val _ _) = do
   zipWithM typeWithDec t $ map fst val
     where typeWithDec t p =
             case (t, paramDec p) of
-              (Array bt shape u, MemArray _ _ _ (ArrayIn mem ixfun))
+              (Array (ElemPrim pt) shape u,
+               MemArray _ _ _ (ArrayIn mem ixfun))
                 | Just (i, mem_p) <- isMergeVar mem,
                   Mem space <- paramType mem_p ->
-                    return $ MemArray bt shape u $ Just $ ReturnsNewBlock space i ixfun'
+                    return $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
                 | otherwise ->
-                  return (MemArray bt shape u $
+                  return (MemArray pt shape u $
                           Just $ ReturnsInBlock mem ixfun')
                   where ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
               (Array{}, _) ->
                 error "expReturns: Array return type but not array merge variable."
-              (Prim bt, _) ->
-                return $ MemPrim bt
+              (Prim pt, _) ->
+                return $ MemPrim pt
               (Mem{}, _) ->
                 error "expReturns: loop returns memory block explicitly."
           isMergeVar v = find ((==v) . paramName . snd) $ zip [0..] mergevars

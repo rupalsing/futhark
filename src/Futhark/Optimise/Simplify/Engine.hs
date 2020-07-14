@@ -323,6 +323,8 @@ makeSafe _ =
 emptyOfType :: MonadBinder m => [VName] -> Type -> m (Exp (Lore m))
 emptyOfType _ Mem{} =
   error "emptyOfType: Cannot hoist non-existential memory."
+emptyOfType _ Acc{} =
+  error "emptyOfType: Cannot hoist accumulator."
 emptyOfType _ (Prim pt) =
   return $ BasicOp $ SubExp $ Constant $ blankPrimValue pt
 emptyOfType ctx_names (Array pt shape _) = do
@@ -819,6 +821,8 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) = do
     shape' <- simplify shape
     return $ Array et shape' u
+  simplify (Acc r v) =
+    Acc r <$> simplify v
   simplify (Mem space) =
     Mem <$> simplify space
   simplify (Prim bt) =

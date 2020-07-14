@@ -694,7 +694,7 @@ checkBasicOp (Update src idxes se) = do
     bad $ TypeError "The target of an Update must not alias the value to be written."
 
   mapM_ checkDimIndex idxes
-  require [Prim (elemType src_t) `arrayOfShape` Shape (sliceDims idxes)] se
+  require [arrayOf (elemToType (elemType src_t)) (Shape (sliceDims idxes)) NoUniqueness] se
   consume =<< lookupAliases src
 
 checkBasicOp (Iota e x s et) = do

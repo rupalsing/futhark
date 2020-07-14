@@ -80,20 +80,27 @@ instance Pretty Space where
   ppr (Space s) = text "@" <> text s
   ppr (ScalarSpace d t) = text "@" <> mconcat (map (brackets . ppr) d) <> ppr t
 
+instance Pretty ElemType where
+  ppr (ElemPrim et) = ppr et
+  ppr (ElemAcc (Rank r) t) = text "acc" <> parens (commasep [ppr r, ppr t])
+
 instance Pretty u => Pretty (TypeBase Shape u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc r v) = ppr $ ElemAcc r v
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc r v) = ppr $ ElemAcc r v
   ppr (Array et (Shape ds) u) =
     ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s
 
 instance Pretty u => Pretty (TypeBase Rank u) where
-  ppr (Prim et) = ppr et
+  ppr (Prim t) = ppr $ ElemPrim t
+  ppr (Acc r v) = ppr $ ElemAcc r v
   ppr (Array et (Rank n) u) =
     ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
   ppr (Mem s) = text "mem" <> ppr s

@@ -24,6 +24,7 @@ module Futhark.IR.Syntax.Core
          , ArrayShape(..)
          , Space (..)
          , SpaceId
+         , ElemType(..)
          , TypeBase(..)
          , Type
          , ExtType
@@ -167,10 +168,21 @@ type SpaceId = String
 data NoUniqueness = NoUniqueness
                   deriving (Eq, Ord, Show)
 
--- | A Futhark type is either an array or an element type.  When
--- comparing types for equality with '==', shapes must match.
+-- | The type of things that can be array elements.
+data ElemType
+  = ElemAcc Rank VName
+    -- ^ Accumulator updating the given array, which must be in scope.
+    -- The 'Rank' argument is how many outer dimensions to strip when
+    -- performing updates.
+  | ElemPrim PrimType
+  deriving (Show, Eq, Ord)
+
+-- | The type of a value.  When comparing types for equality with
+-- '==', shapes must match.
 data TypeBase shape u = Prim PrimType
-                      | Array PrimType shape u
+                      | Acc Rank VName
+                        -- ^ See 'ElemAcc'.
+                      | Array ElemType shape u
                       | Mem Space
                     deriving (Show, Eq, Ord)
 

@@ -30,6 +30,7 @@ module Futhark.IR.Prop.Types
        , arraysSize
        , rowType
        , elemType
+       , elemToType
 
        , transposeType
        , rearrangeType
@@ -78,7 +79,8 @@ import Futhark.IR.Prop.Rearrange
 -- | Remove shape information from a type.
 rankShaped :: ArrayShape shape => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
-rankShaped (Prim et) = Prim et
+rankShaped (Prim pt) = Prim pt
+rankShaped (Acc r v) = Acc r v
 rankShaped (Mem space) = Mem space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
@@ -93,16 +95,24 @@ arrayShape :: ArrayShape shape => TypeBase shape u -> shape
 arrayShape (Array _ ds _) = ds
 arrayShape _              = mempty
 
+-- | Concert an element type to an ordinary type.  Anything that can
+-- be put in an array can also exist on its own, but the opposite is
+-- not true.
+elemToType :: ElemType -> TypeBase shape u
+elemToType (ElemAcc r v) = Acc r v
+elemToType (ElemPrim t) = Prim t
+
 -- | Modify the shape of an array - for non-arrays, this does nothing.
 modifyArrayShape :: ArrayShape newshape =>
                     (oldshape -> newshape)
                  -> TypeBase oldshape u
                  -> TypeBase newshape u
 modifyArrayShape f (Array t ds u)
-  | shapeRank ds' == 0 = Prim t
+  | shapeRank ds' == 0 = elemToType t
   | otherwise          = Array t (f ds) u
   where ds' = f ds
 modifyArrayShape _ (Prim t)    = Prim t
+modifyArrayShape _ (Acc r v)   = Acc r v
 modifyArrayShape _ (Mem space) = Mem space
 
 -- | Set the shape of an array.  If the given type is not an
@@ -136,8 +146,10 @@ staticShapes = map staticShapes1
 
 -- | As 'staticShapes', but on a single type.
 staticShapes1 :: TypeBase Shape u -> TypeBase ExtShape u
-staticShapes1 (Prim bt) =
-  Prim bt
+staticShapes1 (Prim t) =
+  Prim t
+staticShapes1 (Acc r v) =
+  Acc r v
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (Shape $ map Free shape) u
 staticShapes1 (Mem space) =
@@ -155,10 +167,12 @@ arrayOf :: ArrayShape shape =>
            TypeBase shape u_unused -> shape -> u -> TypeBase shape u
 arrayOf (Array et size1 _) size2 u =
   Array et (size2 <> size1) u
-arrayOf (Prim et) s _
-  | 0 <- shapeRank s = Prim et
-arrayOf (Prim et) size u =
-  Array et size u
+arrayOf (Prim t) shape u
+  | 0 <- shapeRank shape = Prim t
+  | otherwise = Array (ElemPrim t) shape u
+arrayOf (Acc r v) shape u
+  | 0 <- shapeRank shape = Acc r v
+  | otherwise = Array (ElemAcc r v) shape u
 arrayOf Mem{} _ _ =
   error "arrayOf Mem"
 
@@ -209,7 +223,7 @@ peelArray :: ArrayShape shape =>
              Int -> TypeBase shape u -> Maybe (TypeBase shape u)
 peelArray 0 t = Just t
 peelArray n (Array et shape u)
-  | shapeRank shape == n = Just $ Prim et
+  | shapeRank shape == n = Just $ elemToType et
   | shapeRank shape >  n = Just $ Array et (stripDims n shape) u
 peelArray _ _ = Nothing
 
@@ -219,7 +233,7 @@ peelArray _ _ = Nothing
 stripArray :: ArrayShape shape => Int -> TypeBase shape u -> TypeBase shape u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
-  | otherwise           = Prim et
+  | otherwise           = elemToType et
 stripArray _ t = t
 
 -- | Return the size of the given dimension.  If the dimension does
@@ -262,12 +276,13 @@ primType Array{} = False
 primType Mem{} = False
 primType _ = True
 
--- | Returns the bottommost type of an array.  For @[[int]]@, this
--- would be @int@.  If the given type is not an array, it is returned.
-elemType :: TypeBase shape u -> PrimType
+-- | Returns the bottommost type of an array.  For @[][]i32@, this
+-- would be @i32@.  If the given type is not an array, it is returned.
+elemType :: TypeBase shape u -> ElemType
 elemType (Array t _ _) = t
-elemType (Prim t)     = t
-elemType Mem{}      = error "elemType Mem"
+elemType (Prim t)      = ElemPrim t
+elemType (Acc r v)     = ElemAcc r v
+elemType Mem{}         = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
 transposeType :: Type -> Type
@@ -284,7 +299,8 @@ rearrangeType perm t =
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
-diet (Prim _) = ObservePrim
+diet Prim{} = ObservePrim
+diet Acc{} = Consume
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem{} = Observe
@@ -299,9 +315,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   u2 <= u1 &&
   t1 == t2 &&
   shape1 `subShapeOf` shape2
-subtypeOf (Prim t1) (Prim t2) = t1 == t2
-subtypeOf (Mem space1) (Mem space2) = space1 == space2
-subtypeOf _ _ = False
+subtypeOf t1 t2 = t1 == t2
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
 -- and each element in @xs@ is a subtype of the corresponding element
@@ -317,14 +331,16 @@ subtypesOf xs ys = length xs == length ys &&
 toDecl :: TypeBase shape NoUniqueness
        -> Uniqueness
        -> TypeBase shape Uniqueness
-toDecl (Prim bt) _ = Prim bt
+toDecl (Prim t) _ = Prim t
+toDecl (Acc r v) _ = Acc r v
 toDecl (Array et shape _) u = Array et shape u
 toDecl (Mem space) _ = Mem space
 
 -- | Remove uniqueness information from the type.
 fromDecl :: TypeBase shape Uniqueness
          -> TypeBase shape NoUniqueness
-fromDecl (Prim bt) = Prim bt
+fromDecl (Prim t) = Prim t
+fromDecl (Acc r v) = Acc r v
 fromDecl (Array et shape _) = Array et shape NoUniqueness
 fromDecl (Mem space) = Mem space
 
@@ -361,6 +377,7 @@ shapeContext = S.fromList
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Prim bt) = Just $ Prim bt
+hasStaticShape (Acc r v) = Just $ Acc r v
 hasStaticShape (Mem space) = Just $ Mem space
 hasStaticShape (Array bt (Shape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u

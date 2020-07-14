@@ -229,18 +229,23 @@ runPatAllocM (PatAllocM m) mems =
   modifyNameSource $ frob . runRWS m mems
   where frob (a,s,w) = ((a,w),s)
 
+elemSize t =
+  case elemType t of
+    ElemPrim t' -> primByteSize t'
+    ElemAcc{} -> 0
+
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   product
-    [ toInt64 $ product $ map (primExpFromSubExp int32) (arrayDims t)
-    , ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t ]
+  [ toInt64 $ product $ map (primExpFromSubExp int32) (arrayDims t)
+  , ValueExp $ IntValue $ Int64Value $ elemSize t ]
   where toInt64 = ConvOpExp $ SExt Int32 Int64
 
 arraySizeInBytesExpM :: Allocator lore m => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   dims <- mapM dimAllocationSize (arrayDims t)
   let dim_prod_i32 = product $ map (toInt64 . primExpFromSubExp int32) dims
-  let elm_size_i64 = ValueExp $ IntValue $ Int64Value $ primByteSize $ elemType t
+      elm_size_i64 = ValueExp $ IntValue $ Int64Value $ elemSize t
   return $ product [ dim_prod_i32, elm_size_i64 ]
   where toInt64 = ConvOpExp $ SExt Int32 Int64
 
@@ -371,16 +376,15 @@ summaryForBindage (Prim bt) _ =
   return $ MemPrim bt
 summaryForBindage (Mem space) _ =
   return $ MemMem space
-summaryForBindage t@(Array bt shape u) NoHint = do
+summaryForBindage t@(Array et shape u) NoHint = do
   m <- allocForArray t =<< askDefaultSpace
-  return $ directIxFun bt shape u m t
-summaryForBindage t (Hint ixfun space) = do
-  let bt = elemType t
+  return $ directIxFun et shape u m
+summaryForBindage t@(Array (ElemPrim pt)  _ _) (Hint ixfun space) = do
   bytes <- computeSize "bytes" $
            product [ConvOpExp (SExt Int32 Int64) (product (IxFun.base ixfun)),
-                    fromIntegral (primByteSize (elemType t)::Int64)]
+                    fromIntegral (primByteSize pt::Int64)]
   m <- allocateMemory "mem" bytes space
-  return $ MemArray bt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
+  return $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 
 lookupMemSpace :: (HasScope lore m, Monad m) => VName -> m Space
 lookupMemSpace v = do
@@ -389,11 +393,10 @@ lookupMemSpace v = do
     Mem space -> return space
     _ -> error $ "lookupMemSpace: " ++ pretty v ++ " is not a memory block."
 
-directIxFun :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
-directIxFun bt shape u mem t =
-  let ixf = IxFun.iota $ map (primExpFromSubExp int32) $ arrayDims t
-  in MemArray bt shape u $ ArrayIn mem ixf
-
+directIxFun :: ElemType -> Shape -> u -> VName -> MemBound u
+directIxFun (ElemPrim pt) shape u mem =
+  let ixf = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
+  in MemArray pt shape u $ ArrayIn mem ixf
 
 allocInFParams :: (Allocable fromlore tolore) =>
                   [(FParam fromlore, Space)] ->
@@ -413,14 +416,14 @@ allocInFParam :: (Allocable fromlore tolore) =>
                  (AllocM fromlore tolore) (FParam tolore)
 allocInFParam param pspace =
   case paramDeclType param of
-    Array bt shape u -> do
+    Array (ElemPrim pt) shape u -> do
       let memname = baseString (paramName param) <> "_mem"
           ixfun = IxFun.iota $ map (primExpFromSubExp int32) $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([], [Param mem $ MemMem pspace])
-      return param { paramDec =  MemArray bt shape u $ ArrayIn mem ixfun }
-    Prim bt ->
-      return param { paramDec = MemPrim bt }
+      return param { paramDec =  MemArray pt shape u $ ArrayIn mem ixfun }
+    Prim pt ->
+      return param { paramDec = MemPrim pt }
     Mem space ->
       return param { paramDec = MemMem space }
 
@@ -452,7 +455,7 @@ allocInMergeParams merge m = do
                          (AllocM fromlore tolore)
                          (FParam tolore, SubExp -> WriterT ([SubExp], [SubExp]) (AllocM fromlore tolore) SubExp)
     allocInMergeParam (mergeparam, Var v)
-      | Array bt shape u <- paramDeclType mergeparam = do
+      | Array (ElemPrim pt) shape u <- paramDeclType mergeparam = do
           (mem', _) <- lift $ lookupArraySummary v
           mem_space <- lift $ lookupMemSpace mem'
 
@@ -476,7 +479,7 @@ allocInMergeParams merge m = do
           mem_name <- newVName "mem_param"
           tell ([], [Param mem_name $ MemMem mem_space])
 
-          return (mergeparam { paramDec = MemArray bt shape u $ ArrayIn mem_name param_ixfun },
+          return (mergeparam { paramDec = MemArray pt shape u $ ArrayIn mem_name param_ixfun },
                   ensureArrayIn mem_space)
 
     allocInMergeParam (mergeparam, _) = doDefault mergeparam =<< lift askDefaultSpace
@@ -546,8 +549,8 @@ allocLinearArray space s v = do
   t <- lookupType v
   mem <- allocForArray t space
   v' <- newIdent (s ++ "_linear") t
-  let ixfun = directIxFun (elemType t) (arrayShape t) NoUniqueness mem t
-  let pat = Pattern [] [PatElem (identName v') ixfun]
+  let ixfun = directIxFun (elemType t) (arrayShape t) NoUniqueness mem
+      pat = Pattern [] [PatElem (identName v') ixfun]
   addStm $ Let pat (defAux ()) $ BasicOp $ Copy v
   return (mem, Var $ identName v')
 
@@ -603,9 +606,9 @@ memoryInDeclExtType :: [DeclExtType] -> [FunReturns]
 memoryInDeclExtType ts = evalState (mapM addMem ts) $ startOfFreeIDRange ts
   where addMem (Prim t) = return $ MemPrim t
         addMem Mem{} = error "memoryInDeclExtType: too much memory"
-        addMem (Array bt shape u) = do
+        addMem (Array (ElemPrim pt) shape u) = do
           i <- get <* modify (+1)
-          return $ MemArray bt shape u $ ReturnsNewBlock DefaultSpace i $
+          return $ MemArray pt shape u $ ReturnsNewBlock DefaultSpace i $
             IxFun.iota $ map convert $ shapeDims shape
 
         convert (Ext i) = LeafExp (Ext i) int32
@@ -813,7 +816,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
             let sp' = fromMaybe DefaultSpace sp
                 ixfn' = fmap (adjustExtPE k) ixfn
                 exttp = case ifr of
-                          Array pt shp' u ->
+                          Array (ElemPrim pt) shp' u ->
                             MemArray pt shp' u $
                             ReturnsNewBlock sp' 0 ixfn'
                           _ -> error "Impossible case reached in addResCtxInIfBody"
@@ -828,7 +831,7 @@ addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
         (MemArray pt shp u (ReturnsNewBlock space k ixfun) : acc, k + 1)
       adjustNewBlockExistential (acc, k) x = (x : acc, k)
 
-      inspect (Array pt shape u) space =
+      inspect (Array (ElemPrim pt) shape u) space =
         let space' = fromMaybe DefaultSpace space
             bodyret = MemArray pt shape u $ ReturnsNewBlock space' 0 $
               IxFun.iota $ map convert $ shapeDims shape
@@ -869,11 +872,11 @@ allocInLoopForm (ForLoop i it n loopvars) =
   where allocInLoopVar (p,a) = do
           (mem, ixfun) <- lookupArraySummary a
           case paramType p of
-            Array bt shape u -> do
+            Array (ElemPrim pt) shape u -> do
               dims <- map (primExpFromSubExp int32) . arrayDims <$> lookupType a
               let ixfun' = IxFun.slice ixfun $
                            fullSliceNum dims [DimFix $ LeafExp i int32]
-              return (p { paramDec = MemArray bt shape u $ ArrayIn mem ixfun' }, a)
+              return (p { paramDec = MemArray pt shape u $ ArrayIn mem ixfun' }, a)
             Prim bt ->
               return (p { paramDec = MemPrim bt }, a)
             Mem space ->

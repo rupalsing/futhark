@@ -862,6 +862,13 @@ internaliseArg desc (arg, argdim) = do
     _ -> return ()
   return arg'
 
+elemPrimType :: I.ElemType -> I.PrimType
+elemPrimType ElemAcc{} = error "elemPrimType: accumulator"
+elemPrimType (ElemPrim t) = t
+
+subExpPrimType :: I.SubExp -> InternaliseM I.PrimType
+subExpPrimType = fmap (elemPrimType . I.elemType) . subExpType
+
 generateCond :: E.Pattern -> [I.SubExp] -> InternaliseM (I.SubExp, [I.SubExp])
 generateCond orig_p orig_ses = do
   (cmps, pertinent, _) <- compares orig_p orig_ses
@@ -871,7 +878,7 @@ generateCond orig_p orig_ses = do
     -- Literals are always primitive values.
     compares (E.PatternLit e _ _) (se:ses) = do
       e' <- internaliseExp1 "constant" e
-      t' <- I.elemType <$> subExpType se
+      t' <- subExpPrimType se
       cmp <- letSubExp "match_lit" $ I.BasicOp $ I.CmpOp (I.CmpEq t') e' se
       return ([cmp], [se], ses)
 
@@ -1482,7 +1489,7 @@ isOverloadedFunction qname args loc = do
                       y_flat <- letExp "y_flat" $ I.BasicOp $ I.Reshape [I.DimNew x_num_elems] y'
 
                       -- Compare the elements.
-                      cmp_lam <- cmpOpLambda (I.CmpEq (elemType x_t)) (elemType x_t)
+                      cmp_lam <- cmpOpLambda $ I.CmpEq (elemPrimType (elemType x_t))
                       cmps <- letExp "cmps" $ I.Op $
                               I.Screma x_num_elems (I.mapSOAC cmp_lam) [x_flat, y_flat]
 

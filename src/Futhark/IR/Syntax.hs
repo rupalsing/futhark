@@ -386,7 +386,7 @@ data BasicOp
   | Replicate Shape SubExp
   -- ^ @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
 
-  | Scratch PrimType [SubExp]
+  | Scratch ElemType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.

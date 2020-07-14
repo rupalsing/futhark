@@ -106,6 +106,8 @@ returnAliases rts args = map returnType' rts
           mempty
         returnType' (Prim _) =
           mempty
+        returnType' Acc{} =
+          error "returnAliases Acc"
         returnType' Mem{} =
           error "returnAliases Mem"
 

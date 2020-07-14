@@ -622,21 +622,21 @@ mapSegOpM tv (SegRed lvl space reds ts lam) =
   <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM (mapSegBinOp tv) reds
-  <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
+  <*> mapM (mapOnType $ mapOnSegOpVName tv) ts
   <*> mapOnSegOpBody tv lam
 mapSegOpM tv (SegScan lvl space scans ts body) =
   SegScan
   <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM (mapSegBinOp tv) scans
-  <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
+  <*> mapM (mapOnType $ mapOnSegOpVName tv) ts
   <*> mapOnSegOpBody tv body
 mapSegOpM tv (SegHist lvl space ops ts body) =
   SegHist
   <$> mapOnSegOpLevel tv lvl
   <*> mapOnSegSpace tv space
   <*> mapM onHistOp ops
-  <*> mapM (mapOnType $ mapOnSegOpSubExp tv) ts
+  <*> mapM (mapOnType $ mapOnSegOpVName tv) ts
   <*> mapOnSegOpBody tv body
   where onHistOp (HistOp w rf arrs nes shape op) =
           HistOp <$> mapOnSegOpSubExp tv w

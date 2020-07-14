@@ -84,7 +84,7 @@ mapExpM tv (BasicOp (SubExp se)) =
   BasicOp <$> (SubExp <$> mapOnSubExp tv se)
 mapExpM tv (BasicOp (ArrayLit els rowt)) =
   BasicOp <$> (ArrayLit <$> mapM (mapOnSubExp tv) els <*>
-              mapOnType (mapOnSubExp tv) rowt)
+              mapOnType (mapOnVName tv) rowt)
 mapExpM tv (BasicOp (BinOp bop x y)) =
   BasicOp <$> (BinOp bop <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
 mapExpM tv (BasicOp (CmpOp op x y)) =
@@ -164,11 +164,20 @@ mapExp m = runIdentity . mapExpM m
 
 -- | Transform any t'SubExp's in the type.
 mapOnType :: Monad m =>
-             (SubExp -> m SubExp) -> Type -> m Type
+             (VName -> m VName) -> Type -> m Type
 mapOnType _ (Prim bt) = return $ Prim bt
+mapOnType f (Acc r v) = Acc r <$> f v
 mapOnType _ (Mem space) = pure $ Mem space
-mapOnType f (Array bt shape u) =
-  Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
+mapOnType f (Array t shape u) =
+  Array <$> mapOnElemType f t <*>
+  (Shape <$> mapM onSubExp (shapeDims shape)) <*> pure u
+  where onSubExp (Constant x) = pure $ Constant x
+        onSubExp (Var v) = Var <$> f v
+
+mapOnElemType :: Monad m =>
+                 (VName -> m VName) -> ElemType -> m ElemType
+mapOnElemType _ (ElemPrim t) = pure $ ElemPrim t
+mapOnElemType f (ElemAcc r v) = ElemAcc r <$> f v
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
@@ -203,6 +212,7 @@ walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 walkOnType :: Monad m =>
              (SubExp -> m ()) -> Type -> m ()
 walkOnType _ Prim{} = return ()
+walkOnType f (Acc _ v) = f $ Var v
 walkOnType _ Mem{} = return ()
 walkOnType f (Array _ shape _) = mapM_ f $ shapeDims shape
 
