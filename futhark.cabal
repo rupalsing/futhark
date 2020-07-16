@@ -58,6 +58,7 @@ library
       Futhark.Analysis.DataDependencies
       Futhark.Analysis.HORep.MapNest
       Futhark.Analysis.HORep.SOAC
+      Futhark.Analysis.LastUse
       Futhark.Analysis.Metrics
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
@@ -179,6 +180,7 @@ library
       Futhark.Optimise.InPlaceLowering.LowerIntoStm
       Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
+      Futhark.Optimise.ReuseAllocations
       Futhark.Optimise.Simplify
       Futhark.Optimise.Simplify.ClosedForm
       Futhark.Optimise.Simplify.Engine

@@ -34,6 +34,7 @@ import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
+import Futhark.Optimise.ReuseAllocations
 import Futhark.Optimise.Fusion
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
@@ -362,6 +363,7 @@ commandLineOptions =
 
   , kernelsMemPassOption doubleBuffer []
   , kernelsMemPassOption expandAllocations []
+  , kernelsMemPassOption reuseAllocations []
 
   , cseOption []
   , simplifyOption "e"

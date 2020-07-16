@@ -18,6 +18,7 @@ import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.ReuseAllocations
 import Futhark.Optimise.Unstream
 import Futhark.Pass.ExpandAllocations
 import qualified Futhark.Pass.ExplicitAllocations.Kernels as Kernels
@@ -87,6 +88,8 @@ gpuPipeline =
   onePass Kernels.explicitAllocations >>>
   passes [ simplifyKernelsMem
          , performCSE False
+         , simplifyKernelsMem
+         , reuseAllocations
          , simplifyKernelsMem
          , doubleBuffer
          , simplifyKernelsMem
